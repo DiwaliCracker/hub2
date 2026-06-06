@@ -4,12 +4,11 @@ const app = express();
 
 let browserInstance = null;
 
-// Warm up the browser once
 async function getBrowser() {
     if (!browserInstance) {
         browserInstance = await chromium.launch({ 
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            args: ['--no-sandbox', '--disable-setuid-sandbox'] 
         });
     }
     return browserInstance;
@@ -26,21 +25,45 @@ app.get('/extract', async (req, res) => {
         });
         const page = await context.newPage();
         
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForSelector('a', { timeout: 15000 });
+        await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 45000 });
 
+        // WAIT and then find all potential download buttons
         const finalUrl = await page.evaluate(() => {
+            // A comprehensive list of patterns found in your HubCloud source files
+            const selectors = [
+                'a#download',
+                'a[href*="hubcloud.php"]',
+                'a[href*="gamerxyt.com"]',
+                'a[href*="hubcloud.one"]',
+                'a:contains("10Gbps")',
+                'a:contains("FSL")',
+                'a:contains("PixelServer")',
+                'a#vd' // The "vd" ID found in your hubcloudextractor.ts
+            ];
+
+            for (const selector of selectors) {
+                const el = document.querySelector(selector);
+                if (el && el.href) return el.href;
+            }
+            
+            // Final desperate attempt: Look for any link with 'googleusercontent'
             const links = Array.from(document.querySelectorAll('a'));
-            const target = links.find(a => a.href.includes('googleusercontent.com') || a.href.includes('hubcdn'));
-            return target ? target.href : null;
+            const gdrive = links.find(a => a.href.includes('googleusercontent.com'));
+            return gdrive ? gdrive.href : null;
         });
 
-        await context.close(); // Clean up context, not browser
-        if (!finalUrl) throw new Error("Link not found");
+        await context.close();
+
+        if (!finalUrl) {
+            // Debugging: Get the page title to see if we are even on the right page
+            const title = await page.title();
+            throw new Error(`Link not found on page: ${title}`);
+        }
+        
         res.redirect(302, finalUrl);
     } catch (error) {
-        res.status(500).send(`Server Error: ${error.message}`);
+        res.status(500).send(`Browser Error: ${error.message}`);
     }
 });
 
-app.listen(3000, () => console.log('Scraper live'));
+app.listen(3000);
